@@ -1,0 +1,197 @@
+---
+title: "Practical Machine Learning - Peer Assessment"
+author: "Konrad Zdeb"
+date: "20 Feb 2015"
+output:
+  html_document:
+    highlight: pygments
+    number_sections: yes
+    theme: united
+---
+
+The following document is designed to meet the requirements of the *Practical Machine Learning - Peer Assessment*. Please note that for the sake of clarity non-informative code, like sourcing or cleaning the data, was suppressed. If you wish to explore the work in a greater detail please refer to the provided markdown document.
+
+*Please note that due to the presentational requirements the documents uses <code>echo=FALSE</code> to process the R code where the output would be too long or not relevant. You may consider chaning it to <code>echo=TRUE</code> if you need the additional R output.*
+
+**The code snippets were not counted in the word count.**
+
+```{r gettingdata, echo=TRUE, eval=TRUE}
+# Clean any objects there may be in memory
+rm(list = ls())
+
+# Source the training and test data from provided URLs. I added the ssl.verifypeer = FALSE, in case of difficulties of sourcing the files on Windows.
+suppressMessages(require(RCurl))
+train.csv <- 
+  getURL("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+         ssl.verifypeer = FALSE)
+test.csv <-
+  getURL("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+         ssl.verifypeer = FALSE)
+# Create data frames
+train.dta <- read.csv(text = train.csv)
+test.dta <- read.csv(text = test.csv)
+```
+
+# Descriptive Analysis and Preparation
+
+## The *Classe* Variable
+The distribution of the *classe* variable is provided in the table below. The percentages account for the row frequencies. 
+
+```{r class.descriptive, echo=FALSE, eval=TRUE, comment="Table"}
+require(knitr, quietly = TRUE, warn.conflicts = FALSE)
+# Make the table with total values
+freq.tbl <- table(train.dta$classe, train.dta$user_name)
+kable(prop.table(freq.tbl, 2)*100, digits = 2)
+```
+
+The  distribution of the *class* variable, accounting for the count of the class values by user, is additionally visualised in the bar chart below.
+
+
+```{r class.descriptive.plot, echo=FALSE, eval=TRUE, fig.align='center', fig.cap= "Class variable across users", fig.height=8, fig.width=8}
+# Make the pie charts showing the relative distribution of the values.
+require(ggplot2, quietly = TRUE, warn.conflicts = FALSE)
+require(ggthemes, quietly = TRUE, warn.conflicts = FALSE)
+ggplot(train.dta, aes(user_name, ..count..)) + 
+  geom_bar(aes(fill = classe), position = "stack") +
+  xlab("User") +
+  ggtitle("Class variable by user") +
+  theme_hc() +
+  geom_text(stat='bin',aes(label=..count..), vjust = -0.5) 
+```
+
+In total the *training data set* consists of `r NCOL(train.dta)` variables.
+
+## Data cleaning 
+
+```{r column.classes, echo=FALSE, eval=TRUE}  
+num.cols <- sapply(train.dta, is.numeric)
+train.dta.strs <- train.dta[ , !num.cols]
+```
+
+Before progressing with the analysis the data is checked for the presence of erroneous values. First we can check columns for existence of string values. It appears that `r NCOL(train.dta.strs)` columns contain strings. As summarised in the extract below, it is noticeable that some of the columns have erroneous values **#DIV/0!**, that on the same lines we can expect for the dates to be stored as factors (as the file was imported from the CSV). 
+
+```{r df.unique.vls, echo=FALSE, eval=TRUE}
+# Make list with unique values
+train.lst.strs.unq <- sapply(train.dta.strs, function(x) unique(x))
+# Make data frame with unique values
+require(data.table, quietly = TRUE, warn.conflicts = FALSE)
+require(pander, quietly = TRUE, warn.conflicts = FALSE)
+pander(head(data.table(train.lst.strs.unq)))
+```
+
+The data cleaning process will involve
+1. Converting dates to the date format
+2. Removing the erroneous **#DIV/0!** values
+3. Ensuring that **NAs** are properly coded as missing values and other minor inconsistencies are fixed accordingly
+
+```{r data.cleaning, echo=TRUE, eval=TRUE}
+# Make a clean data frame
+train.dta.cln <- train.dta
+## Remove DIV/0 values
+train.dta.cln[ train.dta.cln == "#DIV/0!" ] <- NA
+## If there are NA strings clean them as well
+train.dta.cln[ train.dta.cln == "NA" ] <- NA
+## The same with empty strings
+train.dta.cln[ train.dta.cln == "" ] <- NA
+# Convert the date to proper date format
+train.dta.cln$cvtd_timestamp <- as.Date(x = train.dta.cln$cvtd_timestamp, 
+                                        format = "%d/%m/%Y %H:%M")
+## Clean columns with missing data
+train.dta.cln.no.miss <- train.dta.cln[ lapply( 
+  train.dta.cln, function(x) sum(is.na(x)) / length(x) ) < 0.1]
+```
+
+After the cleaning it appears that `r round((sum(is.na(train.dta.cln))/prod(dim(train.dta.cln)))*100, digits = 2)` consists of **NAs**. After removing columns with more than 90% of values missing the total number of columns in data set is `r ncol(train.dta.cln.no.miss)`. 
+
+### Manual deletion
+Finally, it may make sense to remove certain variables by hand. It is observable that certain variables were in-putted to the data set as strings; *variables X, user_name, raw_timestamp_part1, raw_timestamp_part2, cvtd_timestamp, new_window and num_window* are deleted not.
+
+```{r man.dlt, echo=TRUE, eval=TRUE}
+# Columns to keep
+keep.colums <- c('roll_belt', 'pitch_belt', 'yaw_belt', 'total_accel_belt',
+                  'gyros_belt_x', 'gyros_belt_y', 'gyros_belt_z',
+                  'accel_belt_x', 'accel_belt_y', 'accel_belt_z',
+                  'magnet_belt_x', 'magnet_belt_y', 'magnet_belt_z',
+                  'roll_arm', 'pitch_arm', 'yaw_arm', 'total_accel_arm',
+                  'gyros_arm_x', 'gyros_arm_y', 'gyros_arm_z',
+                  'accel_arm_x', 'accel_arm_y', 'accel_arm_z',
+                  'magnet_arm_x', 'magnet_arm_y', 'magnet_arm_z',
+                  'roll_dumbbell', 'pitch_dumbbell', 'yaw_dumbbell', 'total_accel_dumbbell',
+                  'gyros_dumbbell_x', 'gyros_dumbbell_y', 'gyros_dumbbell_z',
+                  'accel_dumbbell_x', 'accel_dumbbell_y', 'accel_dumbbell_z',
+                  'magnet_dumbbell_x', 'magnet_dumbbell_y', 'magnet_dumbbell_z',
+                  'roll_forearm', 'pitch_forearm', 'yaw_forearm', 'total_accel_forearm',
+                  'gyros_forearm_x', 'gyros_forearm_y', 'gyros_forearm_z',
+                  'accel_forearm_x', 'accel_forearm_y', 'accel_forearm_z',
+                  'magnet_forearm_x', 'magnet_forearm_y', 'magnet_forearm_z',
+                 'classe')
+
+# Create clean data set with selected column
+train.dta.cln.sel <- train.dta.cln.no.miss[, keep.colums]
+```
+
+# Analysis
+## Correlations in the data
+Having cleaned the data it is worthwhile to explore the correlations in the data. 
+
+```{r exp.corr, eval=TRUE, echo=TRUE, fig.align='center', fig.cap= "Correlations matrix", fig.height=8, fig.width=8}
+# Compute correlations
+corrs <- cor(train.dta.cln.sel[, names(train.dta.cln.sel) != 'classe'])
+# Draw the correlations matrix
+require(corrplot, quietly = TRUE, warn.conflicts = FALSE)
+corrplot(corr = corrs, method = "color", type = "lower",
+        tl.col = "black", tl.cex =0.9, cl.cex=0.9, insig="blank", sig.level = 0.05)
+```
+
+From the visualised correlation matrix it is observable that some variables are significantly correlated. Using the code below we can get a list of correlations higher then .075.
+
+```{r str.corrs, eval=TRUE, echo=TRUE}
+# I want to exclude pairs of identical variables.
+corrs[which((corrs > 0.75 & corrs != 1) | (corrs < -0.75 & corrs != 1))]
+```
+
+Some correlations are usually high with values 0.98 suggesting bizarre association between variables. Manual exploration of the data, illustrated below, indicates that *roll_belt* variable is strongly correlated with the remaining variables. 
+
+```{r corrs.belt, eval=TRUE, echo=TRUE}
+corrs['roll_belt', 'total_accel_belt']
+corrs['roll_belt', 'accel_belt_z']
+corrs['total_accel_belt', 'accel_belt_z']
+```
+
+Consequently, the *roll_belt* indicator is removed from the **training data**.
+
+```{r rem.roll, eval=TRUE, echo=FALSE}
+train.dta.cln.sel$roll_belt <- NULL 
+# We should also add the 
+```
+
+# Predictive model
+Having cleaned the variables accordingly it is possible to progress with the predictive model. Random forests are often considered to be the winner for lots of problems in classification. They're fast and scalable, and there is no need to worry about the bunch of parameters. The parameters of the model are summarised in the table below.
+
+```{r rand.forest.pcks, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+# Load packages
+packs <- c("randomForest", "grDevices", "caret")
+invisible(capture.output(lapply(packs, require, character.only=T, quietly = TRUE, warn.conflicts = FALSE)))
+```
+
+```{r model, eval=TRUE, echo=FALSE}
+# Load the package
+require(randomForest, quietly = TRUE, warn.conflicts = FALSE)
+# Good practice, in case you want to re-run the code
+set.seed(123)
+# All variables are passed to to the model
+mdl.frst <- randomForest(classe ~ ., data = train.dta.cln.sel)
+mdl.frst
+```
+
+Naturally, we should look at the *confusion matrix*.
+
+```{r conf.mat, eval=TRUE, echo=FALSE}
+kable(mdl.frst$confusion)
+```
+
+The confusion matrix is acceptable. Finally, the validity of the proposed model can be tested using the provided test data set.
+
+```{r mdl.tst, eval=TRUE, echo=TRUE}
+predict(mdl.frst, test.dta)
+```
